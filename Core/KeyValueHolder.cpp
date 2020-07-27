@@ -29,13 +29,8 @@ namespace mmkv {
 
 KeyValueHolder::KeyValueHolder(uint32_t keyLength, uint32_t valueLength, uint32_t off)
     : keySize(static_cast<uint16_t>(keyLength)), valueSize(valueLength), offset(off) {
-    computedKVSize = computKVSize(keyLength, valueLength);
-}
-
-uint16_t KeyValueHolder::computKVSize(uint32_t keySize, uint32_t valueSize) {
-    auto computedKVSize = static_cast<uint16_t>(keySize + pbRawVarint32Size(keySize));
+    computedKVSize = keySize + static_cast<uint16_t>(pbRawVarint32Size(keySize));
     computedKVSize += static_cast<uint16_t>(pbRawVarint32Size(valueSize));
-    return computedKVSize;
 }
 
 MMBuffer KeyValueHolder::toMMBuffer(const void *basePtr) const {
@@ -44,11 +39,13 @@ MMBuffer KeyValueHolder::toMMBuffer(const void *basePtr) const {
     return MMBuffer(realPtr, valueSize, MMBufferNoCopy);
 }
 
+#ifndef MMKV_DISABLE_CRYPT
+
 KeyValueHolderCrypt::KeyValueHolderCrypt(const void *src, size_t length) {
     if (length <= SmallBufferSize()) {
         type = KeyValueHolderType_Direct;
         paddedSize = static_cast<uint8_t>(length);
-        memcpy(value, src, length);
+        memcpy(paddedValue, src, length);
     } else {
         type = KeyValueHolderType_Memory;
         memSize = static_cast<uint32_t>(length);
@@ -66,11 +63,11 @@ KeyValueHolderCrypt::KeyValueHolderCrypt(MMBuffer &&data) {
 
         type = KeyValueHolderType_Direct;
         paddedSize = static_cast<uint8_t>(data.length());
-        memcpy(value, data.getPtr(), data.length());
+        memcpy(paddedValue, data.getPtr(), data.length());
     } else {
-#ifdef MMKV_APPLE
+#    ifdef MMKV_APPLE
         assert(data.m_data == nil);
-#endif
+#    endif
         type = KeyValueHolderType_Memory;
         memSize = static_cast<uint32_t>(data.length());
         memPtr = data.getPtr();
@@ -114,10 +111,6 @@ KeyValueHolderCrypt::~KeyValueHolderCrypt() {
     }
 }
 
-AESCryptStatus *KeyValueHolderCrypt::cryptStatus() const {
-    return (AESCryptStatus *) (&aesNumber);
-}
-
 // get decrypt data with [position, -1)
 static MMBuffer decryptBuffer(AESCrypt &crypter, const MMBuffer &inputBuffer, size_t position) {
     static uint8_t smallBuffer[16];
@@ -143,7 +136,7 @@ static MMBuffer decryptBuffer(AESCrypt &crypter, const MMBuffer &inputBuffer, si
 
 MMBuffer KeyValueHolderCrypt::toMMBuffer(const void *basePtr, const AESCrypt *crypter) const {
     if (type == KeyValueHolderType_Direct) {
-        return MMBuffer((void *) value, paddedSize, MMBufferNoCopy);
+        return MMBuffer((void *) paddedValue, paddedSize, MMBufferNoCopy);
     } else if (type == KeyValueHolderType_Memory) {
         return MMBuffer(memPtr, memSize, MMBufferNoCopy);
     } else {
@@ -151,14 +144,16 @@ MMBuffer KeyValueHolderCrypt::toMMBuffer(const void *basePtr, const AESCrypt *cr
         auto position = static_cast<uint32_t>(pbKeyValueSize + keySize);
         auto realSize = position + valueSize;
         auto kvBuffer = MMBuffer(realPtr, realSize, MMBufferNoCopy);
-        auto decrypter = crypter->cloneWithStatus(*cryptStatus());
+        auto decrypter = crypter->cloneWithStatus(cryptStatus);
         return decryptBuffer(decrypter, kvBuffer, position);
     }
 }
 
+#endif // MMKV_DISABLE_CRYPT
+
 } // namespace mmkv
 
-#ifndef NDEBUG
+#if !defined(MMKV_DISABLE_CRYPT) && !defined(NDEBUG)
 #    include "CodedInputData.h"
 #    include "CodedOutputData.h"
 #    include "MMKVLog.h"
@@ -205,13 +200,15 @@ void KeyValueHolderCrypt::testAESToMMBuffer() {
     KeyValueHolderCrypt kvHolder(keySize, valueSize, 0);
     auto rollbackSize = position + 5;
     decrypt.statusBeforeDecrypt(encryptText + rollbackSize, smallBuffer + rollbackSize, rollbackSize,
-                                *kvHolder.cryptStatus());
+                                kvHolder.cryptStatus);
     auto value = kvHolder.toMMBuffer(encryptText, &decrypt);
 #    ifdef MMKV_APPLE
     MMKVInfo("testAESToMMBuffer: %@", CodedInputData((char *) value.getPtr(), value.length()).readString());
 #    else
     MMKVInfo("testAESToMMBuffer: %s", CodedInputData((char *) value.getPtr(), value.length()).readString().c_str());
 #    endif
+    MMKVInfo("MMBuffer::SmallBufferSize() = %u, KeyValueHolderCrypt::SmallBufferSize() = %u",
+             MMBuffer::SmallBufferSize(), KeyValueHolderCrypt::SmallBufferSize());
 }
 
 } // namespace mmkv

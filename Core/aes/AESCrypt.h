@@ -20,10 +20,18 @@
 
 #ifndef AES_CRYPT_H_
 #define AES_CRYPT_H_
-#ifdef  __cplusplus
+#ifdef __cplusplus
 
-#include <cstddef>
 #include "MMKVPredef.h"
+#include <cstddef>
+
+#ifdef MMKV_DISABLE_CRYPT
+
+namespace mmkv {
+class AESCrypt;
+}
+
+#else
 
 namespace openssl {
 struct AES_KEY;
@@ -45,7 +53,7 @@ class CodedInputDataCrypt;
 // a AES CFB-128 encrypt-decrypt full-duplex wrapper
 class AESCrypt {
     bool m_isClone = false;
-    int m_number = 0;
+    uint32_t m_number = 0;
     openssl::AES_KEY *m_aesKey = nullptr;
     openssl::AES_KEY *m_aesRollbackKey = nullptr;
     uint8_t m_key[AES_KEY_LEN] = {};
@@ -54,6 +62,7 @@ public:
     uint8_t m_vector[AES_KEY_LEN] = {};
 
 private:
+    // for cloneWithStatus()
     AESCrypt(const AESCrypt &other, const AESCryptStatus &status);
 
 public:
@@ -65,8 +74,6 @@ public:
     void encrypt(const void *input, void *output, size_t length);
 
     void decrypt(const void *input, void *output, size_t length);
-
-    // void skipDecrypt(const void *input, size_t length);
 
     void getCurStatus(AESCryptStatus &status);
     void statusBeforeDecrypt(const void *input, const void *output, size_t length, AESCryptStatus &status);
@@ -95,5 +102,6 @@ public:
 
 } // namespace mmkv
 
-#endif
+#endif // MMKV_DISABLE_CRYPT
+#endif // __cplusplus
 #endif /* AES_CRYPT_H_ */

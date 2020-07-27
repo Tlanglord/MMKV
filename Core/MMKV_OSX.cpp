@@ -52,7 +52,6 @@ using namespace mmkv;
 
 extern ThreadLock *g_instanceLock;
 extern MMKVPath_t g_rootDir;
-constexpr uint32_t Fixed32Size = pbFixed32Size();
 
 enum { UnKnown = 0, PowerMac = 1, Mac, iPhone, iPod, iPad, AppleTV, AppleWatch };
 static void GetAppleMachineInfo(int &device, int &version);
@@ -61,7 +60,10 @@ MMKV_NAMESPACE_BEGIN
 
 #    ifdef MMKV_IOS
 MLockPtr::MLockPtr(void *ptr, size_t size) : m_lockDownSize(0), m_lockedPtr(nullptr) {
-    // calc ptr to be mlock()
+    if (!ptr || size == 0) {
+        return;
+    }
+    // calc ptr to mlock()
     auto writePtr = (size_t) ptr;
     auto lockPtr = (writePtr / DEFAULT_MMAP_SIZE) * DEFAULT_MMAP_SIZE;
     auto lockDownSize = writePtr - lockPtr + size;
@@ -72,6 +74,10 @@ MLockPtr::MLockPtr(void *ptr, size_t size) : m_lockDownSize(0), m_lockedPtr(null
         MMKVError("fail to mlock [%p], %s", m_lockedPtr, strerror(errno));
         // just fail on this condition, otherwise app will crash anyway
     }
+}
+
+MLockPtr::MLockPtr(MLockPtr &&other) : m_lockDownSize(other.m_lockDownSize), m_lockedPtr(other.m_lockedPtr) {
+    other.m_lockedPtr = nullptr;
 }
 
 MLockPtr::~MLockPtr() {
@@ -91,7 +97,7 @@ void MMKV::minimalInit(MMKVPath_t defaultRootDir) {
     // crc32 instruction requires A10 chip, aka iPhone 7 or iPad 6th generation
     int device = 0, version = 0;
     GetAppleMachineInfo(device, version);
-#    ifdef __aarch64__
+#    ifdef MMKV_USE_ARMV8_CRC32
     if ((device == iPhone && version >= 9) || (device == iPad && version >= 7)) {
         CRC32 = mmkv::armv8_crc32;
     }
@@ -115,31 +121,19 @@ void MMKV::setIsInBackground(bool isInBackground) {
     MMKVInfo("g_isInBackground:%d", g_isInBackground);
 }
 
-bool protectFromBackgroundWriting(void *ptr, size_t size, WriteBlock block) {
+bool MMKV::isInBackground() {
+    SCOPED_LOCK(g_instanceLock);
+
+    return g_isInBackground;
+}
+
+pair<bool, MLockPtr> guardForBackgroundWriting(void *ptr, size_t size) {
     if (g_isInBackground) {
         MLockPtr mlockPtr(ptr, size);
-        if (mlockPtr.isLocked()) {
-            try {
-                block();
-            } catch (std::exception &exception) {
-                MMKVError("%s", exception.what());
-                return false;
-            }
-        } else {
-            // just fail on this condition, otherwise app will crash anyway
-            //block(m_output);
-            return false;
-        }
+        return make_pair(mlockPtr.isLocked(), move(mlockPtr));
     } else {
-        try {
-            block();
-        } catch (std::exception &exception) {
-            MMKVError("%s", exception.what());
-            return false;
-        }
+        return make_pair(true, MLockPtr(nullptr, 0));
     }
-
-    return true;
 }
 
 #    endif // MMKV_IOS
@@ -153,8 +147,6 @@ bool MMKV::set(NSObject<NSCoding> *__unsafe_unretained obj, MMKVKey_t key) {
         return true;
     }
 
-    // if (MiniPBCoder::isCompatibleObject(obj)) {
-    // auto data = MiniPBCoder::encodeDataWithObject(obj);
     NSData *tmpData = nil;
     if ([obj isKindOfClass:NSString.class]) {
         auto str = (NSString *) obj;
@@ -205,6 +197,10 @@ NSObject *MMKV::getObject(MMKVKey_t key, Class cls) {
     return nil;
 }
 
+#    ifndef MMKV_DISABLE_CRYPT
+
+constexpr uint32_t Fixed32Size = pbFixed32Size();
+
 pair<bool, KeyValueHolder>
 MMKV::appendDataWithKey(const MMBuffer &data, MMKVKey_t key, const KeyValueHolderCrypt &kvHolder, bool isDataHolder) {
     if (kvHolder.type != KeyValueHolderType_Offset) {
@@ -218,11 +214,12 @@ MMKV::appendDataWithKey(const MMBuffer &data, MMKVKey_t key, const KeyValueHolde
 
     auto basePtr = (uint8_t *) m_file->getMemory() + Fixed32Size;
     MMBuffer keyData(rawKeySize);
-    AESCrypt decrypter = m_crypter->cloneWithStatus(*kvHolder.cryptStatus());
+    AESCrypt decrypter = m_crypter->cloneWithStatus(kvHolder.cryptStatus);
     decrypter.decrypt(basePtr + kvHolder.offset, keyData.getPtr(), rawKeySize);
 
     return doAppendDataWithKey(data, keyData, isDataHolder, keyLength);
 }
+#    endif
 
 NSArray *MMKV::allKeys() {
     SCOPED_LOCK(m_lock);
@@ -230,11 +227,11 @@ NSArray *MMKV::allKeys() {
 
     NSMutableArray *keys = [NSMutableArray array];
     if (m_crypter) {
-        for (const auto &pair : m_dicCrypt) {
+        for (const auto &pair : *m_dicCrypt) {
             [keys addObject:pair.first];
         }
     } else {
-        for (const auto &pair : m_dic) {
+        for (const auto &pair : *m_dic) {
             [keys addObject:pair.first];
         }
     }
@@ -256,19 +253,21 @@ void MMKV::removeValuesForKeys(NSArray *arrKeys) {
     size_t deleteCount = 0;
     if (m_crypter) {
         for (NSString *key in arrKeys) {
-            auto itr = m_dicCrypt.find(key);
-            if (itr != m_dicCrypt.end()) {
-                [itr->first release];
-                m_dicCrypt.erase(itr);
+            auto itr = m_dicCrypt->find(key);
+            if (itr != m_dicCrypt->end()) {
+                auto oldKey = itr->first;
+                m_dicCrypt->erase(itr);
+                [oldKey release];
                 deleteCount++;
             }
         }
     } else {
         for (NSString *key in arrKeys) {
-            auto itr = m_dic.find(key);
-            if (itr != m_dic.end()) {
-                [itr->first release];
-                m_dic.erase(itr);
+            auto itr = m_dic->find(key);
+            if (itr != m_dic->end()) {
+                auto oldKey = itr->first;
+                m_dic->erase(itr);
+                [oldKey release];
                 deleteCount++;
             }
         }
@@ -289,7 +288,7 @@ void MMKV::enumerateKeys(EnumerateBlock block) {
 
     MMKVInfo("enumerate [%s] begin", m_mmapID.c_str());
     if (m_crypter) {
-        for (const auto &pair : m_dicCrypt) {
+        for (const auto &pair : *m_dicCrypt) {
             BOOL stop = NO;
             block(pair.first, &stop);
             if (stop) {
@@ -297,7 +296,7 @@ void MMKV::enumerateKeys(EnumerateBlock block) {
             }
         }
     } else {
-        for (const auto &pair : m_dic) {
+        for (const auto &pair : *m_dic) {
             BOOL stop = NO;
             block(pair.first, &stop);
             if (stop) {
@@ -310,14 +309,25 @@ void MMKV::enumerateKeys(EnumerateBlock block) {
 
 MMKV_NAMESPACE_END
 
+#    include <sys/sysctl.h>
+
 static void GetAppleMachineInfo(int &device, int &version) {
     device = UnKnown;
     version = 0;
 
+#    if 0
     struct utsname systemInfo = {};
     uname(&systemInfo);
-
     std::string machine(systemInfo.machine);
+#    else
+    size_t size;
+    sysctlbyname("hw.machine", nullptr, &size, nullptr, 0);
+    char *answer = (char *) malloc(size);
+    sysctlbyname("hw.machine", answer, &size, nullptr, 0);
+    std::string machine(answer);
+    free(answer);
+#    endif
+
     if (machine.find("PowerMac") != std::string::npos || machine.find("Power Macintosh") != std::string::npos) {
         device = PowerMac;
     } else if (machine.find("Mac") != std::string::npos || machine.find("Macintosh") != std::string::npos) {

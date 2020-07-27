@@ -38,11 +38,10 @@ CodedInputData::CodedInputData(const void *oData, size_t length)
 }
 
 void CodedInputData::seek(size_t addedSize) {
-    m_position += addedSize;
-
-    if (m_position > m_size) {
+    if (m_position + addedSize > m_size) {
         throw out_of_range("OutOfSpace");
     }
+    m_position += addedSize;
 }
 
 double CodedInputData::readDouble() {
@@ -77,10 +76,6 @@ int32_t CodedInputData::readInt32() {
 
 uint32_t CodedInputData::readUInt32() {
     return static_cast<uint32_t>(readRawVarint32());
-}
-
-int32_t CodedInputData::readFixed32() {
-    return this->readRawLittleEndian32();
 }
 
 bool CodedInputData::readBool() {

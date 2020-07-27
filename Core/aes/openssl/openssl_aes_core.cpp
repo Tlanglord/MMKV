@@ -41,16 +41,18 @@
 #include "openssl_aes.h"
 #include "openssl_aes_locl.h"
 
-#if (__ARM_MAX_ARCH__ > 7) && defined(MMKV_ANDROID)
+#ifndef MMKV_DISABLE_CRYPT
+
+#if (__ARM_MAX_ARCH__ > 7) && (defined(MMKV_ANDROID) || defined(MMKV_POSIX))
 
 aes_set_encrypt_t AES_set_encrypt_key = openssl::AES_C_set_encrypt_key;
 aes_set_decrypt_t AES_set_decrypt_key = openssl::AES_C_set_decrypt_key;
 aes_encrypt_t AES_encrypt = openssl::AES_C_encrypt;
 aes_encrypt_t AES_decrypt = openssl::AES_C_decrypt;
 
-#endif // (__ARM_MAX_ARCH__ > 7 && defined(MMKV_ANDROID)
+#endif // (__ARM_MAX_ARCH__ > 7 && (defined(MMKV_ANDROID) || defined(MMKV_POSIX))
 
-#if (__ARM_MAX_ARCH__ <= 0) || (__ARM_MAX_ARCH__ > 7 && defined(MMKV_ANDROID))
+#if (__ARM_MAX_ARCH__ <= 0) || (__ARM_MAX_ARCH__ > 7 && (defined(MMKV_ANDROID) || defined(MMKV_POSIX)))
 
 namespace openssl {
 
@@ -919,9 +921,9 @@ void AES_C_encrypt(const uint8_t *in, uint8_t *out, const void *k) {
  * in and out can overlap
  */
 #if (__ARM_MAX_ARCH__ <= 0)
-void AES_decrypt(const unsigned char *in, unsigned char *out, const AES_KEY *key) {
+void AES_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
 #else
-void AES_C_decrypt(const unsigned char *in, unsigned char *out, const void *k) {
+void AES_C_decrypt(const uint8_t *in, uint8_t *out, const void *k) {
     auto key = (AES_KEY*) k;
 #endif
     const u32 *rk;
@@ -1037,5 +1039,6 @@ void AES_C_decrypt(const unsigned char *in, unsigned char *out, const void *k) {
 
 } // namespace openssl
 
-#endif // (__ARM_MAX_ARCH__ < 0) || (__ARM_MAX_ARCH__ > 7 && defined(MMKV_ANDROID))
+#endif // (__ARM_MAX_ARCH__ < 0) || (__ARM_MAX_ARCH__ > 7 && (defined(MMKV_ANDROID) || defined(MMKV_POSIX)))
 
+#endif // MMKV_DISABLE_CRYPT

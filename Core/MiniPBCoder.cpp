@@ -22,11 +22,7 @@
 #include "CodedInputData.h"
 #include "CodedInputDataCrypt.h"
 #include "CodedOutputData.h"
-#include "MMBuffer.h"
 #include "PBEncodeItem.hpp"
-#include "PBUtility.h"
-#include <string>
-#include <vector>
 
 #ifdef MMKV_APPLE
 #    if __has_feature(objc_arc)
@@ -38,18 +34,27 @@ using namespace std;
 
 namespace mmkv {
 
+MiniPBCoder::MiniPBCoder() : m_encodeItems(new std::vector<PBEncodeItem>()) {
+}
+
 MiniPBCoder::MiniPBCoder(const MMBuffer *inputBuffer, AESCrypt *crypter) : MiniPBCoder() {
     m_inputBuffer = inputBuffer;
+#ifndef MMKV_DISABLE_CRYPT
     if (crypter) {
         m_inputDataDecrpt = new CodedInputDataCrypt(m_inputBuffer->getPtr(), m_inputBuffer->length(), *crypter);
     } else {
         m_inputData = new CodedInputData(m_inputBuffer->getPtr(), m_inputBuffer->length());
     }
+#else
+    m_inputData = new CodedInputData(m_inputBuffer->getPtr(), m_inputBuffer->length());
+#endif // MMKV_DISABLE_CRYPT
 }
 
 MiniPBCoder::~MiniPBCoder() {
     delete m_inputData;
+#ifndef MMKV_DISABLE_CRYPT
     delete m_inputDataDecrpt;
+#endif
     delete m_outputBuffer;
     delete m_outputData;
     delete m_encodeItems;
@@ -122,6 +127,8 @@ size_t MiniPBCoder::prepareObjectForEncode(const MMBuffer &buffer) {
     return index;
 }
 
+#ifndef MMKV_DISABLE_CRYPT
+
 size_t MiniPBCoder::prepareObjectForEncode(const MMKVVector &vec) {
     m_encodeItems->push_back(PBEncodeItem());
     PBEncodeItem *encodeItem = &(m_encodeItems->back());
@@ -133,11 +140,11 @@ size_t MiniPBCoder::prepareObjectForEncode(const MMKVVector &vec) {
         for (const auto &itr : vec) {
             const auto &key = itr.first;
             const auto &value = itr.second;
-#ifdef MMKV_APPLE
+#    ifdef MMKV_APPLE
             if (key.length <= 0) {
-#else
+#    else
             if (key.length() <= 0) {
-#endif
+#    endif
                 continue;
             }
 
@@ -160,9 +167,9 @@ size_t MiniPBCoder::prepareObjectForEncode(const MMKVVector &vec) {
     return index;
 }
 
-MMBuffer MiniPBCoder::getEncodeData(const MMKVVector &vec) {
-    m_encodeItems = new vector<PBEncodeItem>();
-    size_t index = prepareObjectForEncode(vec);
+#endif // MMKV_DISABLE_CRYPT
+
+MMBuffer MiniPBCoder::writePreparedItems(size_t index) {
     PBEncodeItem *oItem = (index < m_encodeItems->size()) ? &(*m_encodeItems)[index] : nullptr;
     if (oItem && oItem->compiledSize > 0) {
         m_outputBuffer = new MMBuffer(oItem->compiledSize);
@@ -171,21 +178,21 @@ MMBuffer MiniPBCoder::getEncodeData(const MMKVVector &vec) {
         writeRootObject();
     }
 
-    return move(*m_outputBuffer);
+    return std::move(*m_outputBuffer);
 }
 
-MMBuffer MiniPBCoder::getEncodeData(const MMBuffer &buffer) {
-    m_encodeItems = new vector<PBEncodeItem>();
-    size_t index = prepareObjectForEncode(buffer);
-    PBEncodeItem *oItem = (index < m_encodeItems->size()) ? &(*m_encodeItems)[index] : nullptr;
-    if (oItem && oItem->compiledSize > 0) {
-        m_outputBuffer = new MMBuffer(oItem->compiledSize);
-        m_outputData = new CodedOutputData(m_outputBuffer->getPtr(), m_outputBuffer->length());
-
-        writeRootObject();
+MMBuffer MiniPBCoder::encodeDataWithObject(const MMBuffer &obj) {
+    try {
+        auto valueSize = static_cast<uint32_t>(obj.length());
+        auto compiledSize = pbRawVarint32Size(valueSize) + valueSize;
+        MMBuffer result(compiledSize);
+        CodedOutputData output(result.getPtr(), result.length());
+        output.writeData(obj);
+        return result;
+    } catch (const std::exception &exception) {
+        MMKVError("%s", exception.what());
+        return MMBuffer();
     }
-
-    return move(*m_outputBuffer);
 }
 
 #ifndef MMKV_APPLE
@@ -226,43 +233,7 @@ size_t MiniPBCoder::prepareObjectForEncode(const vector<string> &v) {
     return index;
 }
 
-MMBuffer MiniPBCoder::getEncodeData(const string &str) {
-    m_encodeItems = new vector<PBEncodeItem>();
-    size_t index = prepareObjectForEncode(str);
-    PBEncodeItem *oItem = (index < m_encodeItems->size()) ? &(*m_encodeItems)[index] : nullptr;
-    if (oItem && oItem->compiledSize > 0) {
-        m_outputBuffer = new MMBuffer(oItem->compiledSize);
-        m_outputData = new CodedOutputData(m_outputBuffer->getPtr(), m_outputBuffer->length());
-
-        writeRootObject();
-    }
-
-    return move(*m_outputBuffer);
-}
-
-MMBuffer MiniPBCoder::getEncodeData(const vector<string> &v) {
-    m_encodeItems = new vector<PBEncodeItem>();
-    size_t index = prepareObjectForEncode(v);
-    PBEncodeItem *oItem = (index < m_encodeItems->size()) ? &(*m_encodeItems)[index] : nullptr;
-    if (oItem && oItem->compiledSize > 0) {
-        m_outputBuffer = new MMBuffer(oItem->compiledSize);
-        m_outputData = new CodedOutputData(m_outputBuffer->getPtr(), m_outputBuffer->length());
-
-        writeRootObject();
-    }
-
-    return move(*m_outputBuffer);
-}
-
-string MiniPBCoder::decodeOneString() {
-    return m_inputData->readString();
-}
-
-MMBuffer MiniPBCoder::decodeOneBytes() {
-    return m_inputData->readData();
-}
-
-vector<string> MiniPBCoder::decodeOneSet() {
+vector<string> MiniPBCoder::decodeOneVector() {
     vector<string> v;
 
     m_inputData->readInt32();
@@ -316,6 +287,8 @@ void MiniPBCoder::decodeOneMap(MMKVMap &dic, size_t position, bool greedy) {
     }
 }
 
+#    ifndef MMKV_DISABLE_CRYPT
+
 void MiniPBCoder::decodeOneMap(MMKVMapCrypt &dic, size_t position, bool greedy) {
     auto block = [position, this](MMKVMapCrypt &dictionary) {
         if (position) {
@@ -357,19 +330,11 @@ void MiniPBCoder::decodeOneMap(MMKVMapCrypt &dic, size_t position, bool greedy) 
     }
 }
 
-string MiniPBCoder::decodeString(const MMBuffer &oData) {
-    MiniPBCoder oCoder(&oData);
-    return oCoder.decodeOneString();
-}
+#    endif // MMKV_DISABLE_CRYPT
 
-MMBuffer MiniPBCoder::decodeBytes(const MMBuffer &oData) {
+vector<string> MiniPBCoder::decodeVector(const MMBuffer &oData) {
     MiniPBCoder oCoder(&oData);
-    return oCoder.decodeOneBytes();
-}
-
-vector<string> MiniPBCoder::decodeSet(const MMBuffer &oData) {
-    MiniPBCoder oCoder(&oData);
-    return oCoder.decodeOneSet();
+    return oCoder.decodeOneVector();
 }
 
 #endif // MMKV_APPLE
@@ -384,6 +349,8 @@ void MiniPBCoder::greedyDecodeMap(MMKVMap &dic, const MMBuffer &oData, size_t po
     oCoder.decodeOneMap(dic, position, true);
 }
 
+#ifndef MMKV_DISABLE_CRYPT
+
 void MiniPBCoder::decodeMap(MMKVMapCrypt &dic, const MMBuffer &oData, AESCrypt *crypter, size_t position) {
     MiniPBCoder oCoder(&oData, crypter);
     oCoder.decodeOneMap(dic, position, false);
@@ -393,5 +360,7 @@ void MiniPBCoder::greedyDecodeMap(MMKVMapCrypt &dic, const MMBuffer &oData, AESC
     MiniPBCoder oCoder(&oData, crypter);
     oCoder.decodeOneMap(dic, position, true);
 }
+
+#endif
 
 } // namespace mmkv

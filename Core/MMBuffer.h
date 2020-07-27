@@ -36,7 +36,9 @@ enum MMBufferCopyFlag : bool {
 
 #pragma pack(push, 1)
 
+#ifndef MMKV_DISABLE_CRYPT
 struct KeyValueHolderCrypt;
+#endif
 
 class MMBuffer {
     enum MMBufferType : uint8_t {
@@ -56,12 +58,14 @@ class MMBuffer {
         };
         struct {
             uint8_t paddedSize;
-            uint8_t smallBuffer[1];
+            // make at least 10 bytes to hold all primitive types (negative int32, int64, double etc) on 32 bit device
+            // on 64 bit device it's guaranteed larger than 10 bytes
+            uint8_t paddedBuffer[10];
         };
     };
 
     static constexpr size_t SmallBufferSize() {
-        return sizeof(MMBuffer) - offsetof(MMBuffer, smallBuffer);
+        return sizeof(MMBuffer) - offsetof(MMBuffer, paddedBuffer);
     }
 
 public:
@@ -76,17 +80,20 @@ public:
 
     ~MMBuffer();
 
-    void *getPtr() const { return (type == MMBufferType_Small) ? (void *) smallBuffer : ptr; }
+    void *getPtr() const { return (type == MMBufferType_Small) ? (void *) paddedBuffer : ptr; }
 
     size_t length() const { return (type == MMBufferType_Small) ? paddedSize : size; }
 
+    // transfer ownership to others
     void detach();
 
     // those are expensive, just forbid it for possibly misuse
     explicit MMBuffer(const MMBuffer &other) = delete;
     MMBuffer &operator=(const MMBuffer &other) = delete;
-    
+
+#ifndef MMKV_DISABLE_CRYPT
     friend KeyValueHolderCrypt;
+#endif
 };
 
 #pragma pack(pop)

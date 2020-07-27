@@ -30,6 +30,8 @@
 #    endif
 #endif // MMKV_APPLE
 
+#ifndef MMKV_DISABLE_CRYPT
+
 using namespace std;
 
 namespace mmkv {
@@ -39,7 +41,7 @@ CodedInputDataCrypt::CodedInputDataCrypt(const void *oData, size_t length, AESCr
     m_decryptBufferSize = AES_KEY_LEN * 2;
     m_decryptBufferPosition = static_cast<size_t>(crypt.m_number);
     m_decryptBufferDiscardPosition = m_decryptBufferPosition;
-    m_decryptBufferDecryptPosition = m_decryptBufferPosition;
+    m_decryptBufferDecryptLength = m_decryptBufferPosition;
 
     m_decryptBuffer = (uint8_t *) malloc(m_decryptBufferSize);
     if (!m_decryptBuffer) {
@@ -67,38 +69,41 @@ void CodedInputDataCrypt::consumeBytes(size_t length, bool discardPreData) {
     if (discardPreData) {
         m_decryptBufferDiscardPosition = m_decryptBufferPosition;
     }
-    auto decryptedBytesLeft = m_decryptBufferDecryptPosition - m_decryptBufferPosition;
+    auto decryptedBytesLeft = m_decryptBufferDecryptLength - m_decryptBufferPosition;
     if (decryptedBytesLeft >= length) {
         return;
     }
     length -= decryptedBytesLeft;
 
+    // if there's some data left inside m_decrypter.m_vector, use them first
+    // it will be faster when always decrypt with (n * AES_KEY_LEN) bytes
     if (m_decrypter.m_number != 0) {
-        constexpr auto S_AES_KEY_LEN = static_cast<int32_t>(AES_KEY_LEN);
-        auto alignCrypter = S_AES_KEY_LEN - m_decrypter.m_number;
-        auto s_length = static_cast<int32_t>(length);
-        s_length -= alignCrypter; // might be negative
-        s_length = ((s_length + S_AES_KEY_LEN - 1) / S_AES_KEY_LEN) * S_AES_KEY_LEN;
-        s_length += alignCrypter;
-        assert(static_cast<size_t>(s_length) >= length);
-        length = static_cast<size_t>(s_length);
+        auto alignDecrypter = AES_KEY_LEN - m_decrypter.m_number;
+        // make sure no data left inside m_decrypter.m_vector after decrypt
+        if (length < alignDecrypter) {
+            length = alignDecrypter;
+        } else {
+            length -= alignDecrypter;
+            length = ((length + AES_KEY_LEN - 1) / AES_KEY_LEN) * AES_KEY_LEN;
+            length += alignDecrypter;
+        }
     } else {
         length = ((length + AES_KEY_LEN - 1) / AES_KEY_LEN) * AES_KEY_LEN;
     }
     auto bytesLeftInSrc = m_size - m_decryptPosition;
     length = min(bytesLeftInSrc, length);
 
-    auto bytesLeftInBuffer = m_decryptBufferSize - m_decryptBufferDecryptPosition;
+    auto bytesLeftInBuffer = m_decryptBufferSize - m_decryptBufferDecryptLength;
     // try move some space
     if (bytesLeftInBuffer < length && m_decryptBufferDiscardPosition > 0) {
         auto posToMove = (m_decryptBufferDiscardPosition / AES_KEY_LEN) * AES_KEY_LEN;
         if (posToMove) {
-            auto sizeToMove = m_decryptBufferDecryptPosition - posToMove;
+            auto sizeToMove = m_decryptBufferDecryptLength - posToMove;
             memmove(m_decryptBuffer, m_decryptBuffer + posToMove, sizeToMove);
             m_decryptBufferPosition -= posToMove;
-            m_decryptBufferDecryptPosition -= posToMove;
+            m_decryptBufferDecryptLength -= posToMove;
             m_decryptBufferDiscardPosition = 0;
-            bytesLeftInBuffer = m_decryptBufferSize - m_decryptBufferDecryptPosition;
+            bytesLeftInBuffer = m_decryptBufferSize - m_decryptBufferDecryptLength;
         }
     }
     // still no enough sapce, try realloc()
@@ -111,22 +116,22 @@ void CodedInputDataCrypt::consumeBytes(size_t length, bool discardPreData) {
         m_decryptBuffer = (uint8_t *) newBuffer;
         m_decryptBufferSize = newSize;
     }
-    m_decrypter.decrypt(m_ptr + m_decryptPosition, m_decryptBuffer + m_decryptBufferDecryptPosition, length);
+    m_decrypter.decrypt(m_ptr + m_decryptPosition, m_decryptBuffer + m_decryptBufferDecryptLength, length);
     m_decryptPosition += length;
-    m_decryptBufferDecryptPosition += length;
+    m_decryptBufferDecryptLength += length;
     assert(m_decryptPosition == m_size || m_decrypter.m_number == 0);
 }
 
 void CodedInputDataCrypt::skipBytes(size_t length) {
     m_position += length;
 
-    auto decryptedBytesLeft = m_decryptBufferDecryptPosition - m_decryptBufferPosition;
+    auto decryptedBytesLeft = m_decryptBufferDecryptLength - m_decryptBufferPosition;
     if (decryptedBytesLeft >= length) {
         m_decryptBufferPosition += length;
         return;
     }
     length -= decryptedBytesLeft;
-    // if this happens, we need a optimization like the alignCrypter above
+    // if this happens, we need optimization like the alignDecrypter above
     assert(m_decrypter.m_number == 0);
 
     size_t alignSize = ((length + AES_KEY_LEN - 1) / AES_KEY_LEN) * AES_KEY_LEN;
@@ -142,18 +147,18 @@ void CodedInputDataCrypt::skipBytes(size_t length) {
         m_decrypter.decrypt(m_ptr + m_decryptPosition, m_decryptBuffer, size);
         m_decryptPosition += size;
         m_decryptBufferPosition = size - decryptedBytesLeft;
-        m_decryptBufferDecryptPosition = size;
+        m_decryptBufferDecryptLength = size;
     } else {
         m_decryptBufferPosition = AES_KEY_LEN - decryptedBytesLeft;
-        m_decryptBufferDecryptPosition = AES_KEY_LEN;
+        m_decryptBufferDecryptLength = AES_KEY_LEN;
     }
-    assert(m_decryptBufferPosition <= m_decryptBufferDecryptPosition);
-    assert(m_decryptPosition - m_decryptBufferDecryptPosition + m_decryptBufferPosition == m_position);
+    assert(m_decryptBufferPosition <= m_decryptBufferDecryptLength);
+    assert(m_decryptPosition - m_decryptBufferDecryptLength + m_decryptBufferPosition == m_position);
 }
 
 inline void CodedInputDataCrypt::statusBeforeDecrypt(size_t rollbackSize, AESCryptStatus &status) {
-    rollbackSize += m_decryptBufferDecryptPosition - m_decryptBufferPosition;
-    m_decrypter.statusBeforeDecrypt(m_ptr + m_decryptPosition, m_decryptBuffer + m_decryptBufferDecryptPosition,
+    rollbackSize += m_decryptBufferDecryptLength - m_decryptBufferPosition;
+    m_decrypter.statusBeforeDecrypt(m_ptr + m_decryptPosition, m_decryptBuffer + m_decryptBufferDecryptLength,
                                     rollbackSize, status);
 }
 
@@ -206,97 +211,11 @@ int32_t CodedInputDataCrypt::readRawVarint32(bool discardPreData) {
     return result;
 }
 
-int32_t CodedInputDataCrypt::readRawLittleEndian32() {
-    consumeBytes(4);
-
-    int8_t b1 = this->readRawByte();
-    int8_t b2 = this->readRawByte();
-    int8_t b3 = this->readRawByte();
-    int8_t b4 = this->readRawByte();
-    return (((int32_t) b1 & 0xff)) | (((int32_t) b2 & 0xff) << 8) | (((int32_t) b3 & 0xff) << 16) |
-           (((int32_t) b4 & 0xff) << 24);
-}
-
-int64_t CodedInputDataCrypt::readRawLittleEndian64() {
-    consumeBytes(8);
-
-    int8_t b1 = this->readRawByte();
-    int8_t b2 = this->readRawByte();
-    int8_t b3 = this->readRawByte();
-    int8_t b4 = this->readRawByte();
-    int8_t b5 = this->readRawByte();
-    int8_t b6 = this->readRawByte();
-    int8_t b7 = this->readRawByte();
-    int8_t b8 = this->readRawByte();
-    return (((int64_t) b1 & 0xff)) | (((int64_t) b2 & 0xff) << 8) | (((int64_t) b3 & 0xff) << 16) |
-           (((int64_t) b4 & 0xff) << 24) | (((int64_t) b5 & 0xff) << 32) | (((int64_t) b6 & 0xff) << 40) |
-           (((int64_t) b7 & 0xff) << 48) | (((int64_t) b8 & 0xff) << 56);
-}
-
-double CodedInputDataCrypt::readDouble() {
-    return Int64ToFloat64(this->readRawLittleEndian64());
-}
-
-float CodedInputDataCrypt::readFloat() {
-    return Int32ToFloat32(this->readRawLittleEndian32());
-}
-
-int64_t CodedInputDataCrypt::readInt64() {
-    consumeBytes(10);
-
-    int32_t shift = 0;
-    int64_t result = 0;
-    while (shift < 64) {
-        int8_t b = this->readRawByte();
-        result |= (int64_t)(b & 0x7f) << shift;
-        if ((b & 0x80) == 0) {
-            return result;
-        }
-        shift += 7;
-    }
-    throw invalid_argument("InvalidProtocolBuffer malformedInt64");
-}
-
-uint64_t CodedInputDataCrypt::readUInt64() {
-    return static_cast<uint64_t>(readInt64());
-}
-
 int32_t CodedInputDataCrypt::readInt32() {
     return this->readRawVarint32();
 }
 
-uint32_t CodedInputDataCrypt::readUInt32() {
-    return static_cast<uint32_t>(readRawVarint32());
-}
-
-int32_t CodedInputDataCrypt::readFixed32() {
-    return this->readRawLittleEndian32();
-}
-
-bool CodedInputDataCrypt::readBool() {
-    return this->readRawVarint32() != 0;
-}
-
-#ifndef MMKV_APPLE
-
-string CodedInputDataCrypt::readString() {
-    int32_t size = readRawVarint32();
-    if (size < 0) {
-        throw length_error("InvalidProtocolBuffer negativeSize");
-    }
-
-    auto s_size = static_cast<size_t>(size);
-    if (s_size <= m_size - m_position) {
-        consumeBytes(s_size);
-
-        string result((char *) (m_decryptBuffer + m_decryptBufferPosition), s_size);
-        m_position += s_size;
-        m_decryptBufferPosition += s_size;
-        return result;
-    } else {
-        throw out_of_range("InvalidProtocolBuffer truncatedMessage");
-    }
-}
+#    ifndef MMKV_APPLE
 
 string CodedInputDataCrypt::readString(KeyValueHolderCrypt &kvHolder) {
     kvHolder.offset = static_cast<uint32_t>(m_position);
@@ -321,26 +240,7 @@ string CodedInputDataCrypt::readString(KeyValueHolderCrypt &kvHolder) {
     }
 }
 
-#endif
-
-MMBuffer CodedInputDataCrypt::readData() {
-    int32_t size = this->readRawVarint32();
-    if (size < 0) {
-        throw length_error("InvalidProtocolBuffer negativeSize");
-    }
-
-    auto s_size = static_cast<size_t>(size);
-    if (s_size <= m_size - m_position) {
-        consumeBytes(s_size);
-
-        MMBuffer data(m_decryptBuffer + m_decryptBufferPosition, s_size);
-        m_position += s_size;
-        m_decryptBufferPosition += s_size;
-        return data;
-    } else {
-        throw out_of_range("InvalidProtocolBuffer truncatedMessage");
-    }
-}
+#    endif
 
 void CodedInputDataCrypt::readData(KeyValueHolderCrypt &kvHolder) {
     int32_t size = this->readRawVarint32();
@@ -357,7 +257,7 @@ void CodedInputDataCrypt::readData(KeyValueHolderCrypt &kvHolder) {
                 static_cast<uint8_t>(pbRawVarint32Size(kvHolder.valueSize) + pbRawVarint32Size(kvHolder.keySize));
 
             size_t rollbackSize = kvHolder.pbKeyValueSize + kvHolder.keySize;
-            statusBeforeDecrypt(rollbackSize, *kvHolder.cryptStatus());
+            statusBeforeDecrypt(rollbackSize, kvHolder.cryptStatus);
 
             skipBytes(s_size);
         } else {
@@ -374,3 +274,5 @@ void CodedInputDataCrypt::readData(KeyValueHolderCrypt &kvHolder) {
 }
 
 } // namespace mmkv
+
+#endif // MMKV_DISABLE_CRYPT

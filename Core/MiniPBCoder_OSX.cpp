@@ -93,8 +93,9 @@ void MiniPBCoder::decodeOneMap(MMKVMap &dic, size_t position, bool greedy) {
                 } else {
                     auto itr = dictionary.find(key);
                     if (itr != dictionary.end()) {
+                        auto oldKey = itr->first;
                         dictionary.erase(itr);
-                        [itr->first release];
+                        [oldKey release];
                     }
                 }
             }
@@ -121,6 +122,8 @@ void MiniPBCoder::decodeOneMap(MMKVMap &dic, size_t position, bool greedy) {
     }
 }
 
+#    ifndef MMKV_DISABLE_CRYPT
+
 void MiniPBCoder::decodeOneMap(MMKVMapCrypt &dic, size_t position, bool greedy) {
     auto block = [position, this](MMKVMapCrypt &dictionary) {
         if (position) {
@@ -139,8 +142,9 @@ void MiniPBCoder::decodeOneMap(MMKVMapCrypt &dic, size_t position, bool greedy) 
                 } else {
                     auto itr = dictionary.find(key);
                     if (itr != dictionary.end()) {
+                        auto oldKey = itr->first;
                         dictionary.erase(itr);
-                        [itr->first release];
+                        [oldKey release];
                     }
                 }
             }
@@ -167,19 +171,7 @@ void MiniPBCoder::decodeOneMap(MMKVMapCrypt &dic, size_t position, bool greedy) 
     }
 }
 
-MMBuffer MiniPBCoder::getEncodeData(__unsafe_unretained NSObject *obj) {
-    m_encodeItems = new vector<PBEncodeItem>();
-    size_t index = prepareObjectForEncode(obj);
-    PBEncodeItem *oItem = (index < m_encodeItems->size()) ? &(*m_encodeItems)[index] : nullptr;
-    if (oItem && oItem->compiledSize > 0) {
-        m_outputBuffer = new MMBuffer(oItem->compiledSize);
-        m_outputData = new CodedOutputData(m_outputBuffer->getPtr(), m_outputBuffer->length());
-
-        writeRootObject();
-    }
-
-    return move(*m_outputBuffer);
-}
+#    endif // MMKV_DISABLE_CRYPT
 
 NSObject *MiniPBCoder::decodeObject(const MMBuffer &oData, Class cls) {
     if (!cls || oData.length() == 0) {
@@ -201,20 +193,6 @@ NSObject *MiniPBCoder::decodeObject(const MMBuffer &oData, Class cls) {
     }
 
     return nil;
-}
-
-bool MiniPBCoder::isCompatibleObject(NSObject *obj) {
-    if ([obj isKindOfClass:[NSString class]]) {
-        return true;
-    }
-    if ([obj isKindOfClass:[NSData class]]) {
-        return true;
-    }
-    if ([obj isKindOfClass:[NSDate class]]) {
-        return true;
-    }
-
-    return false;
 }
 
 bool MiniPBCoder::isCompatibleClass(Class cls) {

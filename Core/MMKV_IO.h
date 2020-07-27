@@ -20,28 +20,30 @@
 
 #ifndef MMKV_IO_h
 #define MMKV_IO_h
-#ifdef  __cplusplus
+#ifdef __cplusplus
 
 #include "MMKV.h"
-#include <string>
 
 MMKV_NAMESPACE_BEGIN
 
-std::string mmapedKVKey(const std::string &mmapID, MMKVPath_t *relativePath = nullptr);
-MMKVPath_t mappedKVPathWithID(const std::string &mmapID, MMKVMode mode, MMKVPath_t *relativePath);
-MMKVPath_t crcPathWithID(const std::string &mmapID, MMKVMode mode, MMKVPath_t *relativePath);
+std::string mmapedKVKey(const std::string &mmapID, MMKVPath_t *rootPath = nullptr);
+MMKVPath_t mappedKVPathWithID(const std::string &mmapID, MMKVMode mode, MMKVPath_t *rootPath);
+MMKVPath_t crcPathWithID(const std::string &mmapID, MMKVMode mode, MMKVPath_t *rootPath);
 
 MMKVRecoverStrategic onMMKVCRCCheckFail(const std::string &mmapID);
 MMKVRecoverStrategic onMMKVFileLengthError(const std::string &mmapID);
 
 template <typename T>
-void clearDictionary(T &dic) {
+void clearDictionary(T *dic) {
+    if (!dic) {
+        return;
+    }
 #ifdef MMKV_APPLE
-    for (auto &pair : dic) {
+    for (auto &pair : *dic) {
         [pair.first release];
     }
 #endif
-    dic.clear();
+    dic->clear();
 }
 
 enum : bool {

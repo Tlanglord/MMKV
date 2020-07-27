@@ -23,10 +23,7 @@
 #ifdef  __cplusplus
 
 #include "MMBuffer.h"
-#include "MMKVPredef.h"
 #include <cstdint>
-#include <vector>
-#include "KeyValueHolder.h"
 
 namespace mmkv {
 class CodedOutputData;
@@ -51,21 +48,25 @@ enum MMKVMode : uint32_t {
 
 class MMKV {
 #ifndef MMKV_ANDROID
-    MMKV(const std::string &mmapID, MMKVMode mode, std::string *cryptKey, MMKVPath_t *relativePath);
     std::string m_mmapKey;
+    MMKV(const std::string &mmapID, MMKVMode mode, std::string *cryptKey, MMKVPath_t *rootPath);
 #else // defined(MMKV_ANDROID)
-    MMKV(const std::string &mmapID, int size, MMKVMode mode, std::string *cryptKey, MMKVPath_t *relativePath);
+    mmkv::FileLock *m_fileModeLock;
+    mmkv::InterProcessLock *m_sharedProcessModeLock;
+    mmkv::InterProcessLock *m_exclusiveProcessModeLock;
+
+    MMKV(const std::string &mmapID, int size, MMKVMode mode, std::string *cryptKey, MMKVPath_t *rootPath);
 
     MMKV(const std::string &mmapID, int ashmemFD, int ashmemMetaFd, std::string *cryptKey = nullptr);
 #endif
 
     ~MMKV();
 
-    mmkv::MMKVMap m_dic;
-    mmkv::MMKVMapCrypt m_dicCrypt;
     std::string m_mmapID;
     MMKVPath_t m_path;
     MMKVPath_t m_crcPath;
+    mmkv::MMKVMap *m_dic;
+    mmkv::MMKVMapCrypt *m_dicCrypt;
 
     mmkv::MemoryFile *m_file;
     size_t m_actualSize;
@@ -128,17 +129,21 @@ class MMKV {
 
     bool removeDataForKey(MMKVKey_t key);
 
+    using KVHolderRet_t = std::pair<bool, mmkv::KeyValueHolder>;
     // isDataHolder: avoid memory copying
-    std::pair<bool, mmkv::KeyValueHolder> doAppendDataWithKey(const mmkv::MMBuffer &data, const mmkv::MMBuffer &key, bool isDataHolder, uint32_t keyLength);
-    std::pair<bool, mmkv::KeyValueHolder> appendDataWithKey(const mmkv::MMBuffer &data, MMKVKey_t key, bool isDataHolder = false);
-    std::pair<bool, mmkv::KeyValueHolder> appendDataWithKey(const mmkv::MMBuffer &data, const mmkv::KeyValueHolder &kvHolder, bool isDataHolder = false);
+    KVHolderRet_t doAppendDataWithKey(const mmkv::MMBuffer &data, const mmkv::MMBuffer &key, bool isDataHolder, uint32_t keyLength);
+    KVHolderRet_t appendDataWithKey(const mmkv::MMBuffer &data, MMKVKey_t key, bool isDataHolder = false);
+    KVHolderRet_t appendDataWithKey(const mmkv::MMBuffer &data, const mmkv::KeyValueHolder &kvHolder, bool isDataHolder = false);
 #ifdef MMKV_APPLE
-    std::pair<bool, mmkv::KeyValueHolder> appendDataWithKey(const mmkv::MMBuffer &data, MMKVKey_t key, const mmkv::KeyValueHolderCrypt &kvHolder, bool isDataHolder = false);
+    KVHolderRet_t appendDataWithKey(const mmkv::MMBuffer &data,
+                                    MMKVKey_t key,
+                                    const mmkv::KeyValueHolderCrypt &kvHolder,
+                                    bool isDataHolder = false);
 #endif
 
     void notifyContentChanged();
 
-#ifdef MMKV_ANDROID
+#if defined(MMKV_ANDROID) && !defined(MMKV_DISABLE_CRYPT)
     void checkReSetCryptKey(int fd, int metaFD, std::string *cryptKey);
 #endif
 
@@ -162,7 +167,7 @@ public:
     static MMKV *mmkvWithID(const std::string &mmapID,
                             MMKVMode mode = MMKV_SINGLE_PROCESS,
                             std::string *cryptKey = nullptr,
-                            MMKVPath_t *relativePath = nullptr);
+                            MMKVPath_t *rootPath = nullptr);
 
 #else // defined(MMKV_ANDROID)
 
@@ -173,7 +178,7 @@ public:
                             int size = mmkv::DEFAULT_MMAP_SIZE,
                             MMKVMode mode = MMKV_SINGLE_PROCESS,
                             std::string *cryptKey = nullptr,
-                            MMKVPath_t *relativePath = nullptr);
+                            MMKVPath_t *rootPath = nullptr);
 
     static MMKV *mmkvWithAshmemFD(const std::string &mmapID, int fd, int metaFD, std::string *cryptKey = nullptr);
 
@@ -181,6 +186,7 @@ public:
 
     int ashmemMetaFD();
 
+    bool checkProcessMode();
 #endif // MMKV_ANDROID
 
     // you can call this on application termination, it's totally fine if you don't call
@@ -190,6 +196,7 @@ public:
 
     const bool m_isInterProcess;
 
+#ifndef MMKV_DISABLE_CRYPT
     std::string cryptKey();
 
     // transform plain text into encrypted text, or vice versa with empty cryptKey
@@ -199,6 +206,7 @@ public:
     // just reset cryptKey (will not encrypt or decrypt anything)
     // usually you should call this method after other process reKey() the multi-process mmkv
     void checkReSetCryptKey(const std::string *cryptKey);
+#endif
 
     bool set(bool value, MMKVKey_t key);
 
@@ -278,6 +286,7 @@ public:
 
 #    ifdef MMKV_IOS
     static void setIsInBackground(bool isInBackground);
+    static bool isInBackground();
 #    endif
 #else  // !defined(MMKV_APPLE)
     std::vector<std::string> allKeys();

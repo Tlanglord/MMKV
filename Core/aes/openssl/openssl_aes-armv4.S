@@ -40,8 +40,9 @@
 */
 
 #include "openssl_arm_arch.h"
+#include "../../MMKVPredef.h"
 
-#if (__ARM_MAX_ARCH__ <= 7) && (__ARM_MAX_ARCH__ > 0)
+#if (__ARM_MAX_ARCH__ <= 7) && (__ARM_MAX_ARCH__ > 0) && !defined(MMKV_DISABLE_CRYPT)
 
 .text
 #if defined(__thumb2__) && !defined(__APPLE__)
@@ -158,10 +159,9 @@ AES_Te:
 .word	0x1B000000, 0x36000000, 0, 0, 0, 0, 0, 0
 
 
-/* void openssl_aes_arm_encrypt(const unsigned char *in, unsigned char *out,
-* 		 const AES_KEY *key) {
+/* void openssl_aes_arm_encrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
 */
-#ifndef __ANDROID__
+#ifndef __linux__
 .globl	_openssl_aes_arm_encrypt
 #ifdef __thumb2__
 .thumb_func	_openssl_aes_arm_encrypt
@@ -184,7 +184,7 @@ openssl_aes_arm_encrypt:
 	stmdb	sp!,{r1,r4-r12,lr}
 #if defined(__thumb2__) || defined(__APPLE__)
 	adr	r10,AES_Te
-#elif defined(__ANDROID__)
+#elif defined(__linux__)
 	sub	r10,r3,#openssl_aes_arm_encrypt-AES_Te	// Te
 #else
 	sub	r10,r3,#_openssl_aes_arm_encrypt-AES_Te	// Te
@@ -425,7 +425,7 @@ Lenc_loop:
 	ldr	pc,[sp],#4		// pop and return
 
 
-#ifndef __ANDROID__
+#ifndef __linux__
 .globl	_openssl_aes_arm_set_encrypt_key
 #ifdef __thumb2__
 .thumb_func	_openssl_aes_arm_set_encrypt_key
@@ -741,21 +741,21 @@ Labrt:
 .word	0xe12fff1e			// interoperable with Thumb ISA:-)
 #endif
 
-#ifndef __ANDROID__
+#ifndef __linux__
 .globl    _openssl_aes_arm_set_decrypt_key
 #ifdef __thumb2__
 .thumb_func    _openssl_aes_arm_set_decrypt_key
 #endif
 .align    5
 _openssl_aes_arm_set_decrypt_key:
-#else // __ANDROID__
+#else // __linux__
 .globl    openssl_aes_arm_set_decrypt_key
 #ifdef __thumb2__
 .thumb_func    openssl_aes_arm_set_decrypt_key
 #endif
 .align    5
 openssl_aes_arm_set_decrypt_key:
-#endif // __ANDROID__
+#endif // __linux__
     str    lr,[sp,#-4]!            // push lr
     bl    _armv4_AES_set_encrypt_key
     teq    r0,#0
@@ -963,23 +963,22 @@ AES_Td:
 .byte    0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d
 
 
-// void AES_decrypt(const unsigned char *in, unsigned char *out,
-//          const AES_KEY *key) {
-#ifndef __ANDROID__
+// void AES_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
+#ifndef __linux__
 .globl    _openssl_aes_arm_decrypt
 #ifdef __thumb2__
 .thumb_func    _openssl_aes_arm_decrypt
 #endif
 .align    5
 _openssl_aes_arm_decrypt:
-#else // __ANDROID__
+#else // __linux__
 .globl    openssl_aes_arm_decrypt
 #ifdef __thumb2__
 .thumb_func    openssl_aes_arm_decrypt
 #endif
 .align    5
 openssl_aes_arm_decrypt:
-#endif // __ANDROID__
+#endif // __linux__
 #ifndef    __thumb2__
     sub    r3,pc,#8        // _AES_decrypt
 #else
@@ -988,7 +987,7 @@ openssl_aes_arm_decrypt:
     stmdb    sp!,{r1,r4-r12,lr}
 #if defined(__thumb2__) || defined(__APPLE__)
     adr    r10,AES_Td
-#elif __ANDROID__
+#elif defined(__linux__)
     sub    r10,r3,#openssl_aes_arm_decrypt-AES_Td    // Td
 #else
     sub    r10,r3,#_openssl_aes_arm_decrypt-AES_Td    // Td

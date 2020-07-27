@@ -43,6 +43,7 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
     private static EnumMap<MMKVRecoverStrategic, Integer> recoverIndex;
     private static EnumMap<MMKVLogLevel, Integer> logLevel2Index;
     private static MMKVLogLevel[] index2LogLevel;
+    private static HashSet<Long> checkedHandleSet;
     static {
         recoverIndex = new EnumMap<>(MMKVRecoverStrategic.class);
         recoverIndex.put(MMKVRecoverStrategic.OnErrorDiscard, 0);
@@ -57,6 +58,8 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
 
         index2LogLevel = new MMKVLogLevel[] {MMKVLogLevel.LevelDebug, MMKVLogLevel.LevelInfo, MMKVLogLevel.LevelWarning,
                                              MMKVLogLevel.LevelError, MMKVLogLevel.LevelNone};
+
+        checkedHandleSet = new HashSet<Long>();
     }
 
     public interface LibLoader { void loadLibrary(String libName); }
@@ -154,7 +157,7 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
         }
 
         long handle = getMMKVWithID(mmapID, SINGLE_PROCESS_MODE, null, null);
-        return new MMKV(handle);
+        return checkProcessMode(handle, mmapID, SINGLE_PROCESS_MODE);
     }
 
     public static MMKV mmkvWithID(String mmapID, int mode) {
@@ -163,7 +166,7 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
         }
 
         long handle = getMMKVWithID(mmapID, mode, null, null);
-        return new MMKV(handle);
+        return checkProcessMode(handle, mmapID, mode);
     }
 
     // cryptKey's length <= 16
@@ -173,34 +176,28 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
         }
 
         long handle = getMMKVWithID(mmapID, mode, cryptKey, null);
-        return new MMKV(handle);
+        return checkProcessMode(handle, mmapID, mode);
     }
 
     @Nullable
-    public static MMKV mmkvWithID(String mmapID, String relativePath) {
+    public static MMKV mmkvWithID(String mmapID, String rootPath) {
         if (rootDir == null) {
             throw new IllegalStateException("You should Call MMKV.initialize() first.");
         }
 
-        long handle = getMMKVWithID(mmapID, SINGLE_PROCESS_MODE, null, relativePath);
-        if (handle == 0) {
-            return null;
-        }
-        return new MMKV(handle);
+        long handle = getMMKVWithID(mmapID, SINGLE_PROCESS_MODE, null, rootPath);
+        return checkProcessMode(handle, mmapID, SINGLE_PROCESS_MODE);
     }
 
     // cryptKey's length <= 16
     @Nullable
-    public static MMKV mmkvWithID(String mmapID, int mode, String cryptKey, String relativePath) {
+    public static MMKV mmkvWithID(String mmapID, int mode, String cryptKey, String rootPath) {
         if (rootDir == null) {
             throw new IllegalStateException("You should Call MMKV.initialize() first.");
         }
 
-        long handle = getMMKVWithID(mmapID, mode, cryptKey, relativePath);
-        if (handle == 0) {
-            return null;
-        }
-        return new MMKV(handle);
+        long handle = getMMKVWithID(mmapID, mode, cryptKey, rootPath);
+        return checkProcessMode(handle, mmapID, mode);
     }
 
     // a memory only MMKV, cleared on program exit
@@ -260,7 +257,7 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
         }
 
         long handle = getDefaultMMKV(SINGLE_PROCESS_MODE, null);
-        return new MMKV(handle);
+        return checkProcessMode(handle, "DefaultMMKV", SINGLE_PROCESS_MODE);
     }
 
     public static MMKV defaultMMKV(int mode, String cryptKey) {
@@ -269,6 +266,25 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
         }
 
         long handle = getDefaultMMKV(mode, cryptKey);
+        return checkProcessMode(handle, "DefaultMMKV", mode);
+    }
+
+    private static MMKV checkProcessMode(long handle, String mmapID, int mode) {
+        if (handle == 0) {
+            return null;
+        }
+        if (!checkedHandleSet.contains(handle)) {
+            if (!checkProcessMode(handle)) {
+                String message;
+                if (mode == SINGLE_PROCESS_MODE) {
+                    message = "Opening a multi-process MMKV instance [" + mmapID + "] with SINGLE_PROCESS_MODE!";
+                } else {
+                    message = "Opening a single-process MMKV instance [" + mmapID + "] with MULTI_PROCESS_MODE!";
+                }
+                throw new IllegalArgumentException(message);
+            }
+            checkedHandleSet.add(handle);
+        }
         return new MMKV(handle);
     }
 
@@ -824,7 +840,7 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
 
     private static native void jniInitialize(String rootDir, int level);
 
-    private native static long getMMKVWithID(String mmapID, int mode, String cryptKey, String relativePath);
+    private native static long getMMKVWithID(String mmapID, int mode, String cryptKey, String rootPath);
 
     private native static long getMMKVWithIDAndSize(String mmapID, int size, int mode, String cryptKey);
 
@@ -883,4 +899,6 @@ public class MMKV implements SharedPreferences, SharedPreferences.Editor {
     private static native void destroyNB(long pointer, int size);
 
     private native int writeValueToNB(long handle, String key, long pointer, int size);
+
+    private static native boolean checkProcessMode(long handle);
 }

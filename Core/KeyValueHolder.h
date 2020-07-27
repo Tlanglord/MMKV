@@ -20,9 +20,10 @@
 
 #ifndef KeyValueHolder_hpp
 #define KeyValueHolder_hpp
-#ifdef  __cplusplus
+#ifdef __cplusplus
 
 #include "MMBuffer.h"
+#include "aes/AESCrypt.h"
 
 namespace mmkv {
 
@@ -37,19 +38,16 @@ struct KeyValueHolder {
     KeyValueHolder() = default;
     KeyValueHolder(uint32_t keyLength, uint32_t valueLength, uint32_t offset);
 
-    static uint16_t computKVSize(uint32_t keySize, uint32_t valueSize);
-
     MMBuffer toMMBuffer(const void *basePtr) const;
 };
+
+#ifndef MMKV_DISABLE_CRYPT
 
 enum KeyValueHolderType : uint8_t {
     KeyValueHolderType_Direct, // store value directly
     KeyValueHolderType_Memory, // store value in the heap memory
     KeyValueHolderType_Offset, // store value by offset
 };
-
-class AESCrypt;
-struct AESCryptStatus;
 
 // kv holder for encrypted mmkv
 struct KeyValueHolderCrypt {
@@ -62,13 +60,12 @@ struct KeyValueHolderCrypt {
             uint16_t keySize;
             uint32_t valueSize;
             uint32_t offset;
-            uint8_t aesNumber;
-            uint8_t aesVector[AES_KEY_LEN];
+            AESCryptStatus cryptStatus;
         };
         // store value directly
         struct {
             uint8_t paddedSize;
-            uint8_t value[1];
+            uint8_t paddedValue[1];
         };
         // store value in the heap memory
         struct {
@@ -78,12 +75,10 @@ struct KeyValueHolderCrypt {
     };
 
     static constexpr size_t SmallBufferSize() {
-        return sizeof(KeyValueHolderCrypt) - offsetof(KeyValueHolderCrypt, value);
+        return sizeof(KeyValueHolderCrypt) - offsetof(KeyValueHolderCrypt, paddedValue);
     }
 
-    static bool isValueStoredAsOffset(size_t valueSize) {
-        return valueSize >= 256;
-    }
+    static bool isValueStoredAsOffset(size_t valueSize) { return valueSize >= 256; }
 
     KeyValueHolderCrypt() = default;
     KeyValueHolderCrypt(const void *valuePtr, size_t valueLength);
@@ -96,12 +91,10 @@ struct KeyValueHolderCrypt {
 
     ~KeyValueHolderCrypt();
 
-    AESCryptStatus *cryptStatus() const;
-
     MMBuffer toMMBuffer(const void *basePtr, const AESCrypt *crypter) const;
 
-    std::tuple<uint32_t, uint32_t, AESCryptStatus *> toTuple() const {
-        return std::make_tuple(offset, pbKeyValueSize + keySize + valueSize, cryptStatus());
+    std::tuple<uint32_t, uint32_t, AESCryptStatus *> toTuple() {
+        return std::make_tuple(offset, pbKeyValueSize + keySize + valueSize, &cryptStatus);
     }
 
     // those are expensive, just forbid it for possibly misuse
@@ -112,6 +105,8 @@ struct KeyValueHolderCrypt {
     static void testAESToMMBuffer();
 #endif
 };
+
+#endif // MMKV_DISABLE_CRYPT
 
 #pragma pack(pop)
 
