@@ -24,8 +24,8 @@
 #include "MMKV.h"
 #include "MMKVLog.h"
 #include "MemoryFile.h"
-#include <cstdint>
 #include <jni.h>
+#include <cstdint>
 #include <string>
 
 #ifdef __aarch64__

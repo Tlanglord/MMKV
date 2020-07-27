@@ -27,8 +27,9 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.support.annotation.Nullable;
 import android.util.Log;
-import androidx.annotation.Nullable;
+
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.EnumMap;

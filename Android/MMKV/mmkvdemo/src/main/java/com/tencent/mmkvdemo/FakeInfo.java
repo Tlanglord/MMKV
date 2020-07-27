@@ -2,7 +2,7 @@ package com.tencent.mmkvdemo;
 
 import android.os.Parcel;
 import android.os.Parcelable;
-import androidx.annotation.NonNull;
+import android.support.annotation.NonNull;
 
 public class FakeInfo implements Parcelable {
     public String channelId;

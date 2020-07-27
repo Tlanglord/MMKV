@@ -24,11 +24,12 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.IBinder;
+import android.support.annotation.Nullable;
 import android.util.Log;
-import androidx.annotation.Nullable;
+
 import com.tencent.mmkv.MMKV;
-import com.tencent.mmkv.MMKVLogLevel;
 import com.tencent.mmkv.ParcelableMMKV;
+
 import java.util.Random;
 
 public abstract class BenchMarkBaseService extends Service {

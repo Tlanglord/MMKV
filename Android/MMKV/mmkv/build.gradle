@@ -1,18 +1,34 @@
 apply from: rootProject.file('gradle/build_library.gradle')
 
 android {
+    compileSdkVersion 27
 //    defaultPublishConfig "StaticCppRelease"
     defaultPublishConfig "SharedCppRelease"
     defaultConfig {
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             cmake {
-                abiFilters 'armeabi', 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+//                abiFilters 'armeabi', 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+                abiFilters  'armeabi-v7a', 'arm64-v8a'//, 'arm64-v8a', 'x86', 'x86_64'
             }
         }
         // ndk doesn't have targetSDK support
         //minSdkVersion = 26
     }
+
+    sourceSets {
+        main {
+//            jniLibs.srcDirs = ['libs']
+//            jniLibs.srcDirs = ['src/main/cpp/ffmpeg']
+            jni.srcDirs = ['src/main/cpp']
+//            java.srcDirs += ['src/main/java']
+//            res.srcDirs += [
+//                    'src/main/res/layouts',
+//                    'src/main/res/layouts/layout'
+//            ]
+        }
+    }
+
+
     buildTypes {
         release {
             minifyEnabled false
@@ -22,8 +38,8 @@ android {
                 }
             }
             consumerProguardFiles 'proguard-rules.pro'
-//            debuggable true
-//            jniDebuggable true
+            debuggable true
+            jniDebuggable true
         }
         debug {
             jniDebuggable true
@@ -31,8 +47,9 @@ android {
     }
     externalNativeBuild {
         cmake {
-            path "CMakeLists.txt"
-            version "3.8.0+"
+            path "src/main/cpp/CMakeLists.txt"
+//            version "3.8.0+"
+            version "3.10.2"
         }
     }
 
@@ -65,9 +82,5 @@ configurations {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation 'androidx.annotation:annotation:1.1.0'
-    javadocDeps 'androidx.annotation:annotation:1.1.0'
-    testImplementation 'junit:junit:4.12'
-    androidTestImplementation 'androidx.test:runner:1.2.0'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.2.0'
+    implementation 'com.android.support:support-annotations:27.1.1'
 }
